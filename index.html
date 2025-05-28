@@ -18,6 +18,7 @@
       --card: #ffffff;
       --text: #2b2d42;
       --text-light: #8d99ae;
+      --notification: #4caf50;
     }
     
     * {
@@ -47,6 +48,24 @@
       text-align: center;
       box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
       margin-bottom: 2rem;
+      position: relative;
+    }
+    
+    .notification-badge {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background-color: var(--notification);
+      color: white;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: bold;
+      display: none;
     }
     
     h1, h2, h3 {
@@ -271,6 +290,26 @@
       min-width: 200px;
     }
     
+    /* Notificações */
+    .notification {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background-color: var(--notification);
+      color: white;
+      padding: 15px 25px;
+      border-radius: 5px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      z-index: 1000;
+      display: none;
+      animation: slideIn 0.3s ease-out;
+    }
+    
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    
     /* Responsividade */
     @media (max-width: 768px) {
       .tabs {
@@ -286,6 +325,12 @@
       .filters {
         flex-direction: column;
       }
+      
+      .notification {
+        width: calc(100% - 40px);
+        left: 20px;
+        right: auto;
+      }
     }
   </style>
 </head>
@@ -295,8 +340,13 @@
   <div class="container">
     <h1>Agenda Compartilhada</h1>
     <p>Organize seus compromissos pessoais e profissionais</p>
+    <div class="notification-badge" id="notificationBadge">0</div>
   </div>
 </header>
+
+<div class="notification" id="notification">
+  Novo compromisso adicionado!
+</div>
 
 <div class="container">
   <!-- Abas -->
@@ -426,7 +476,6 @@
     storageBucket: "agendacompartilhada-efb33.firebasestorage.app",
     messagingSenderId: "402652247600",
     appId: "1:402652247600:web:52778feaafeb1d18badff5"
-
   };
 
   // Inicialização do Firebase
@@ -437,14 +486,40 @@
   const form = document.getElementById('formCompromisso');
   const listaCompromissos = document.getElementById('listaCompromissos');
   const filteredCompromissos = document.getElementById('filteredCompromissos');
+  const notification = document.getElementById('notification');
+  const notificationBadge = document.getElementById('notificationBadge');
   
-  // Variáveis para filtros
+  // Variáveis para controle
   let currentFilters = {
     category: 'todos',
     date: 'todos',
     recurrent: 'todos',
     author: ''
   };
+  let unreadNotifications = 0;
+
+  // Função para mostrar notificação
+  function showNotification(message) {
+    const notification = document.getElementById('notification');
+    notification.textContent = message;
+    notification.style.display = 'block';
+    
+    // Atualiza o badge de notificação
+    unreadNotifications++;
+    notificationBadge.textContent = unreadNotifications;
+    notificationBadge.style.display = 'flex';
+    
+    // Esconde a notificação após 5 segundos
+    setTimeout(() => {
+      notification.style.display = 'none';
+    }, 5000);
+  }
+
+  // Função para limpar notificações
+  function clearNotifications() {
+    unreadNotifications = 0;
+    notificationBadge.style.display = 'none';
+  }
 
   // Função para alternar entre abas
   function openTab(tabName) {
@@ -456,6 +531,20 @@
     
     document.getElementById(tabName).classList.add('active');
     event.currentTarget.classList.add('active');
+    
+    // Limpa notificações quando a aba de compromissos é aberta
+    if (tabName === 'compromissos') {
+      clearNotifications();
+    }
+  }
+
+  // Função para formatar a data para exibição
+  function formatarData(dataString) {
+    const partes = dataString.split('-');
+    if (partes.length === 3) {
+      return `${partes[2]}/${partes[1]}/${partes[0]}`; // Formato DD/MM/YYYY
+    }
+    return dataString; // Retorna original se não puder formatar
   }
 
   // Função para adicionar compromisso
@@ -464,17 +553,27 @@
 
     const titulo = document.getElementById('titulo').value;
     const nome = document.getElementById('nome').value;
-    const data = document.getElementById('data').value;
+    const dataInput = document.getElementById('data').value;
     const hora = document.getElementById('hora').value;
     const categoria = document.getElementById('categoria').value;
     const recorrente = document.getElementById('recorrente').checked;
     const descricao = document.getElementById('descricao').value;
 
+    // Validação da data
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    const dataSelecionada = new Date(dataInput);
+    
+    if (dataSelecionada < hoje) {
+      alert('Não é possível agendar compromissos no passado!');
+      return;
+    }
+
     try {
       await db.collection('compromissos').add({
         titulo,
         nome,
-        data,
+        data: dataInput, // Armazena no formato YYYY-MM-DD
         hora,
         categoria,
         recorrente,
@@ -482,11 +581,11 @@
         dataCriacao: firebase.firestore.FieldValue.serverTimestamp()
       });
       form.reset();
-      alert('Compromisso adicionado com sucesso!');
+      showNotification('Compromisso adicionado com sucesso!');
       openTab('compromissos');
     } catch (error) {
       console.error("Erro ao adicionar compromisso: ", error);
-      alert('Ocorreu um erro ao adicionar o compromisso.');
+      showNotification('Erro ao adicionar compromisso!');
     }
   });
 
@@ -507,8 +606,7 @@
       if (compromisso.recorrente) li.classList.add('recorrente');
       
       // Formata a data para exibição
-      const dataObj = new Date(compromisso.data);
-      const dataFormatada = dataObj.toLocaleDateString('pt-BR');
+      const dataFormatada = formatarData(compromisso.data);
       
       li.innerHTML = `
         <div class="compromisso-header">
@@ -534,6 +632,14 @@
     db.collection('compromissos').orderBy('dataCriacao', 'desc').onSnapshot(snapshot => {
       const compromissos = snapshot.docs;
       renderizarCompromissos(compromissos, listaCompromissos);
+      
+      // Verifica se há novos compromissos adicionados
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added' && !change.doc.metadata.hasPendingWrites) {
+          const compromisso = change.doc.data();
+          showNotification(`Novo compromisso: ${compromisso.titulo} por ${compromisso.nome}`);
+        }
+      });
       
       // Se estiver na aba de filtros, aplica os filtros atuais
       if (document.getElementById('filtros').classList.contains('active')) {
@@ -604,6 +710,7 @@
       })
       .catch(error => {
         console.error("Erro ao filtrar compromissos: ", error);
+        showNotification('Erro ao filtrar compromissos!');
       });
   }
 
@@ -612,9 +719,10 @@
     if (confirm('Tem certeza que deseja remover este compromisso?')) {
       try {
         await db.collection('compromissos').doc(id).delete();
+        showNotification('Compromisso removido com sucesso!');
       } catch (error) {
         console.error("Erro ao remover compromisso: ", error);
-        alert('Ocorreu um erro ao remover o compromisso.');
+        showNotification('Erro ao remover compromisso!');
       }
     }
   }
